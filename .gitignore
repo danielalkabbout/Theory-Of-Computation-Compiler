@@ -1,0 +1,59 @@
+# Visual Studio
+.vs/
+.vs/**
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Dependency directories
+node_modules/
+.venv/
+env/
+venv/
+
+# Build / Output
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor / IDE
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Misc
+*.class
+*.o
+*.so
+*.exe
+*.dll
+*.pdb
+*.lock
+*.tmp
+*.bak
+*.swp
+*.swo

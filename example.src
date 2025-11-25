@@ -1,0 +1,9 @@
+let x = 10;
+let y = x + 2 * (3 + 4);
+print y;
+
+
+let x=10;
+let c=22;
+let y=(x*(c+10))*x;
+print (y);

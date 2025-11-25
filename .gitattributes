@@ -1,0 +1,11 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Ensure shell scripts use LF
+*.sh eol=lf
+
+# Mark common binary files (no EOL conversion)
+*.png binary
+*.jpg binary
+*.exe binary
+*.dll binary
