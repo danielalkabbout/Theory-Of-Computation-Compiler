@@ -24,7 +24,7 @@ enum TokenType {
 	T_KW_LET,
 	T_KW_PRINT,
 	T_PLUS,
-	T_MINUS,
+	T_MINUS,    
 	T_STAR,
 	T_SLASH,
 	T_EQUAL,

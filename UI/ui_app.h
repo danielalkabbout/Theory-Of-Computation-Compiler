@@ -49,6 +49,7 @@ private:
 	HWND hEditSemantics = nullptr;
 	HWND hEditTrans = nullptr;
 	HWND hParseGraph = nullptr;
+	HWND hAutoGraph = nullptr;
 
 	// Styling
 	HFONT hUIFont = nullptr;
@@ -74,7 +75,7 @@ private:
 
 	std::string translatedPython;
 	bool translationDone = false;
-
+	static LRESULT CALLBACK AutoGraphProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 private:
 	// Lifecycle
 	bool initBackend();
@@ -97,7 +98,7 @@ private:
 	void formatASTTo(std::string& out);
 	void invalidateFromLex();
 	void invalidateFromParseOnly();
-
+	void drawAutomaton(HDC hdc, RECT rcClient);
 	// Graph
 	void drawParseTree(HDC hdc, RECT rcClient);
 
@@ -105,5 +106,6 @@ private:
 	static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK ParseGraphProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };
+
 
 

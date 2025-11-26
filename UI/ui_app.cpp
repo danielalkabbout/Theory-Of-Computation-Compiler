@@ -91,7 +91,7 @@ bool UiApp::initBackend() {
 bool UiApp::createMainWindow(int nCmdShow) {
 	WNDCLASSA wc = {};
 	wc.style = CS_HREDRAW | CS_VREDRAW;
-	wc.lpfnWndProc = UiApp::MainWndProc;
+	wc.lpfnWndProc = &UiApp::MainWndProc;
 	wc.hInstance = hInst;
 	wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
 	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
@@ -101,7 +101,7 @@ bool UiApp::createMainWindow(int nCmdShow) {
 
 	WNDCLASSA wcAuto = {};
 	wcAuto.style = CS_HREDRAW | CS_VREDRAW;
-	wcAuto.lpfnWndProc = UiApp::AutoGraphProc;
+	wcAuto.lpfnWndProc = &UiApp::AutoGraphProc;
 	wcAuto.hInstance = hInst;
 	wcAuto.hCursor = LoadCursor(nullptr, IDC_ARROW);
 	wcAuto.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
