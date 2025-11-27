@@ -30,7 +30,7 @@
 #define IDC_AUTOGRAPH 1013
 
 static const char* kMainWndClass = "TC_GUI_MAIN";
-static const char* kAutoGraphClass = "TC_GUI_AUTOGRAPH";
+static const char* kParseGraphClass = "TC_GUI_PARSEGRAPH";
 
 static const char* inputClassName(int ic) {
 	switch (ic) {
@@ -62,6 +62,23 @@ static const char* tokenTypeNameInt(int tok) {
 	case T_SEMI: return "SEMI";
 	default: return "UNKNOWN";
 	}
+}
+
+// Normalize newlines for Windows EDIT controls (convert lone \\n to \\r\\n)
+static std::string toCRLF(const std::string& s) {
+	std::string out;
+	out.reserve(s.size() + 16);
+	char prev = 0;
+	for (char ch : s) {
+		if (ch == '\n') {
+			if (prev != '\r') out.push_back('\r');
+			out.push_back('\n');
+		} else {
+			out.push_back(ch);
+		}
+		prev = ch;
+	}
+	return out;
 }
 
 bool UiApp::run(HINSTANCE hInstance, int nCmdShow) {
@@ -99,14 +116,14 @@ bool UiApp::createMainWindow(int nCmdShow) {
 	wc.lpszClassName = kMainWndClass;
 	if (!RegisterClassA(&wc)) return false;
 
-	WNDCLASSA wcAuto = {};
-	wcAuto.style = CS_HREDRAW | CS_VREDRAW;
-	wcAuto.lpfnWndProc = &UiApp::AutoGraphProc;
-	wcAuto.hInstance = hInst;
-	wcAuto.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wcAuto.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-	wcAuto.lpszClassName = kAutoGraphClass;
-	if (!RegisterClassA(&wcAuto)) return false;
+	WNDCLASSA wcParse = {};
+	wcParse.style = CS_HREDRAW | CS_VREDRAW;
+	wcParse.lpfnWndProc = &UiApp::ParseGraphProc;
+	wcParse.hInstance = hInst;
+	wcParse.hCursor = LoadCursor(nullptr, IDC_ARROW);
+	wcParse.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	wcParse.lpszClassName = kParseGraphClass;
+	if (!RegisterClassA(&wcParse)) return false;
 
 	hMainWnd = CreateWindowExA(
 		0, kMainWndClass, "Theory of Computation - GUI",
@@ -145,7 +162,8 @@ void UiApp::createChildControls() {
 	TCITEMA item = {}; item.mask = TCIF_TEXT;
 	item.pszText = (LPSTR)"Tokens"; TabCtrl_InsertItem(hTab, 0, &item);
 	item.pszText = (LPSTR)"Parse Tree"; TabCtrl_InsertItem(hTab, 1, &item);
-	item.pszText = (LPSTR)"Translation"; TabCtrl_InsertItem(hTab, 2, &item);
+	item.pszText = (LPSTR)"Semantics"; TabCtrl_InsertItem(hTab, 2, &item);
+	item.pszText = (LPSTR)"Translation"; TabCtrl_InsertItem(hTab, 3, &item);
 
 	hEditSource = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
 		WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL,
@@ -156,12 +174,15 @@ void UiApp::createChildControls() {
 	hEditParse = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
 		WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
 		0, 0, 100, 100, hMainWnd, (HMENU)IDC_EDIT_PARSE, hInst, nullptr);
+	hEditSemantics = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
+		WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
+		0, 0, 100, 100, hMainWnd, nullptr, hInst, nullptr);
 	hEditTrans = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
 		WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_HSCROLL,
 		0, 0, 100, 100, hMainWnd, (HMENU)IDC_EDIT_TRANS, hInst, nullptr);
 
-	hAutoGraph = CreateWindowExA(0, kAutoGraphClass, "",
-		WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, hMainWnd, (HMENU)IDC_AUTOGRAPH, hInst, this);
+	hParseGraph = CreateWindowExA(0, kParseGraphClass, "",
+		WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, hMainWnd, nullptr, hInst, this);
 
 	// Populate automaton combo
 	SendMessageA(hComboAutomata, CB_RESETCONTENT, 0, 0);
@@ -188,8 +209,7 @@ void UiApp::layoutControls(int clientW, int clientH) {
 	MoveWindow(hBtnSave, x, pad, 80, topH, TRUE);
 
 	int y = pad + topH + pad;
-	int graphW = 360;
-	int rightW = clientW - (pad + leftW + pad + graphW + pad);
+	int rightW = clientW - (pad + leftW + pad);
 	if (rightW < 300) rightW = 300;
 
 	MoveWindow(hEditSource, pad, y, leftW, clientH - y - pad, TRUE);
@@ -201,14 +221,17 @@ void UiApp::layoutControls(int clientW, int clientH) {
 	MoveWindow(hEditTokens, pad + leftW + pad + tabX, y + tabY, tabW, tabH, TRUE);
 	MoveWindow(hEditParse, pad + leftW + pad + tabX, y + tabY, tabW, tabH, TRUE);
 	MoveWindow(hEditTrans, pad + leftW + pad + tabX, y + tabY, tabW, tabH, TRUE);
+	MoveWindow(hEditSemantics, pad + leftW + pad + tabX, y + tabY, tabW, tabH, TRUE);
+	MoveWindow(hParseGraph, pad + leftW + pad + tabX, y + tabY, tabW, tabH, TRUE);
 
 	int sel = TabCtrl_GetCurSel(hTab);
 	ShowWindow(hEditTokens, (sel == 0) ? SW_SHOW : SW_HIDE);
-	ShowWindow(hEditParse, (sel == 1) ? SW_SHOW : SW_HIDE);
-	ShowWindow(hEditTrans, (sel == 2) ? SW_SHOW : SW_HIDE);
+	ShowWindow(hEditParse, SW_HIDE);
+	ShowWindow(hParseGraph, (sel == 1) ? SW_SHOW : SW_HIDE);
+	ShowWindow(hEditSemantics, (sel == 2) ? SW_SHOW : SW_HIDE);
+	ShowWindow(hEditTrans, (sel == 3) ? SW_SHOW : SW_HIDE);
 
-	int autoX = pad + leftW + pad + rightW + pad;
-	MoveWindow(hAutoGraph, autoX, y, graphW, clientH - y - pad, TRUE);
+	// no right-side graph
 }
 
 void UiApp::onLex() {
@@ -260,7 +283,12 @@ void UiApp::onParse() {
 }
 
 void UiApp::onSemantics() {
-	if (!parsedOk || !astRoot) return;
+	if (!parsedOk || !astRoot) {
+		setEditText(hEditSemantics, "No AST. Run parsing first or fix parse errors.\r\n");
+		SendMessageA(hTab, TCM_SETCURSEL, 2, 0);
+		RECT r; GetClientRect(hMainWnd, &r); layoutControls(r.right - r.left, r.bottom - r.top);
+		return;
+	}
 	symbolTable = SymbolTable{};
 	semResult = analyzeSemantics(astRoot, symbolTable);
 	semanticsDone = true;
@@ -269,16 +297,23 @@ void UiApp::onSemantics() {
 	if (!semResult.ok) {
 		char buf[64]; snprintf(buf, sizeof(buf), "Errors: %d\r\n", semResult.errorCount);
 		res += buf;
+		for (int i = 0; i < semResult.errorCount; ++i) {
+			const SemanticError& e = semResult.errors[i];
+			char line[256];
+			if (e.line > 0)
+				snprintf(line, sizeof(line), "  line %d, col %d: %s\r\n", e.line, e.col, e.message.c_str());
+			else
+				snprintf(line, sizeof(line), "  %s\r\n", e.message.c_str());
+			res += line;
+		}
 	} else {
 		res += "OK (no errors)\r\n";
 	}
-	int curLen = GetWindowTextLengthA(hEditParse);
-	std::unique_ptr<char[]> curbuf(new char[curLen + 1]);
-	GetWindowTextA(hEditParse, curbuf.get(), curLen + 1);
-	std::string currentText(curbuf.get(), curLen);
-	currentText += "\r\n";
-	currentText += res;
-	setEditText(hEditParse, currentText);
+	std::string crlf = toCRLF(res);
+	setEditText(hEditSemantics, crlf);
+	// switch to Semantics tab
+	SendMessageA(hTab, TCM_SETCURSEL, 2, 0);
+	RECT r; GetClientRect(hMainWnd, &r); layoutControls(r.right - r.left, r.bottom - r.top);
 
 	translatedPython.clear();
 	translationDone = false;
@@ -298,7 +333,8 @@ void UiApp::onTranslate() {
 		return;
 	}
 	translationDone = true;
-	setEditText(hEditTrans, translatedPython);
+	std::string crlf = toCRLF(translatedPython);
+	setEditText(hEditTrans, crlf);
 }
 
 void UiApp::onRunAll() {
@@ -327,7 +363,7 @@ void UiApp::onAutomatonChanged() {
 	int ids[MAX_AUTOMATA]; int cnt = automatonManager.listIds(ids, MAX_AUTOMATA);
 	if (sel >= cnt) return;
 	selectedAutomaton = automatonManager.findById(ids[sel]);
-	InvalidateRect(hAutoGraph, nullptr, TRUE);
+	// nothing to redraw on the right
 }
 
 void UiApp::setEditText(HWND hEdit, const std::string& text) {
@@ -427,6 +463,74 @@ void UiApp::formatASTTo(std::string& out) {
 	printWithLabel(astRoot, "", true, "root");
 }
 
+// --- Helpers for graphical parse rendering ---
+static void nodeLabel(ASTNode* n, std::string& out) {
+	out.clear();
+	if (!n) return;
+	switch (n->type) {
+	case N_PROGRAM: out = "PROG"; return;
+	case N_STMT_LIST: out = "LIST"; return;
+	case N_LET_STMT: out = "LET"; return;
+	case N_PRINT_STMT: out = "PRINT"; return;
+	case N_BIN_OP: out = n->text.empty() ? "op" : n->text; return;
+	case N_IDENT: out = n->text; return;
+	case N_NUMBER: out = n->text; return;
+	}
+	out = "?";
+}
+
+static void collectChildren(ASTNode* n, ASTNode** outArr, int& outCount) {
+	outCount = 0;
+	if (!n) return;
+	if (n->type == N_STMT_LIST) {
+		ASTNode* cur = n->left;
+		while (cur && outCount < 64) {
+			outArr[outCount++] = cur;
+			cur = cur->next;
+		}
+		return;
+	}
+	if (n->type == N_PROGRAM) {
+		if (n->left) outArr[outCount++] = n->left;
+		return;
+	}
+	if (n->type == N_LET_STMT) {
+		if (n->left) outArr[outCount++] = n->left;
+		if (n->right) outArr[outCount++] = n->right;
+		return;
+	}
+	if (n->type == N_PRINT_STMT) {
+		if (n->left) outArr[outCount++] = n->left;
+		return;
+	}
+	if (n->left) outArr[outCount++] = n->left;
+	if (n->right) outArr[outCount++] = n->right;
+}
+
+static int subtreeWidthPx(ASTNode* n, int nodeW, int hGap) {
+	if (!n) return 0;
+	ASTNode* kids[64]; int kc = 0;
+	collectChildren(n, kids, kc);
+	if (kc == 0) return nodeW;
+	int sum = 0;
+	for (int i = 0; i < kc; ++i) {
+		int cw = subtreeWidthPx(kids[i], nodeW, hGap);
+		sum += cw;
+		if (i + 1 < kc) sum += hGap;
+	}
+	if (sum < nodeW) sum = nodeW;
+	return sum;
+}
+
+static void drawCenteredText(HDC hdc, int cx, int cy, const std::string& s) {
+	SIZE sz{};
+	GetTextExtentPoint32A(hdc, s.c_str(), (int)s.size(), &sz);
+	int x = cx - sz.cx / 2;
+	int y = cy - sz.cy / 2;
+	TextOutA(hdc, x, y, s.c_str(), (int)s.size());
+}
+
+
 void UiApp::invalidateFromLex() {
 	tokensReady = false;
 	lexerError.clear();
@@ -449,54 +553,6 @@ void UiApp::invalidateFromParseOnly() {
 	semanticsDone = false;
 	translatedPython.clear();
 	translationDone = false;
-}
-
-void UiApp::drawAutomaton(HDC hdc, RECT rcClient) {
-	if (!selectedAutomaton) return;
-	int w = rcClient.right - rcClient.left;
-	int h = rcClient.bottom - rcClient.top;
-	int cx = rcClient.left + w / 2;
-	int cy = rcClient.top + h / 2;
-	int radius = (w < h ? w : h) / 2 - 40;
-	if (radius < 40) radius = 40;
-
-	const Automaton& a = *selectedAutomaton;
-	POINT pos[MAX_STATES];
-	int n = a.numStates;
-	for (int i = 0; i < n; ++i) {
-		double ang = (2.0 * 3.1415926535 * i) / (double)n;
-		pos[i].x = cx + (LONG)(radius * cos(ang));
-		pos[i].y = cy + (LONG)(radius * sin(ang));
-	}
-
-	HPEN penEdge = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
-	HGDIOBJ oldPen = SelectObject(hdc, penEdge);
-	for (int s = 0; s < n; ++s) {
-		for (int ic = 0; ic < NUM_INPUT_CLASSES; ++ic) {
-			int ns = a.transitionTable[s][ic];
-			if (ns >= 0 && ns < n) {
-				MoveToEx(hdc, pos[s].x, pos[s].y, nullptr);
-				LineTo(hdc, pos[ns].x, pos[ns].y);
-				int mx = (pos[s].x + pos[ns].x) / 2;
-				int my = (pos[s].y + pos[ns].y) / 2;
-				const char* lbl = inputClassName(ic);
-				TextOutA(hdc, mx, my, lbl, (int)strlen(lbl));
-			}
-		}
-	}
-	SelectObject(hdc, oldPen);
-	DeleteObject(penEdge);
-
-	for (int s = 0; s < n; ++s) {
-		RECT r = { pos[s].x - 20, pos[s].y - 20, pos[s].x + 20, pos[s].y + 20 };
-		Ellipse(hdc, r.left, r.top, r.right, r.bottom);
-		if (isAccepting(a, s)) {
-			RECT r2 = { pos[s].x - 16, pos[s].y - 16, pos[s].x + 16, pos[s].y + 16 };
-			Ellipse(hdc, r2.left, r2.top, r2.right, r2.bottom);
-		}
-		char name[16]; snprintf(name, sizeof(name), "S%d", s);
-		TextOutA(hdc, r.left + 6, r.top + 6, name, (int)strlen(name));
-	}
 }
 
 LRESULT CALLBACK UiApp::MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -552,20 +608,97 @@ LRESULT CALLBACK UiApp::MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 	return 0;
 }
 
-LRESULT CALLBACK UiApp::AutoGraphProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK UiApp::ParseGraphProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	UiApp* self = (UiApp*)GetWindowLongPtr(GetParent(hWnd), GWLP_USERDATA);
 	switch (msg) {
 	case WM_PAINT: {
 		PAINTSTRUCT ps;
 		HDC hdc = BeginPaint(hWnd, &ps);
 		RECT rc; GetClientRect(hWnd, &rc);
-		if (self) self->drawAutomaton(hdc, rc);
+		if (self) self->drawParseTree(hdc, rc);
 		EndPaint(hWnd, &ps);
 		return 0;
 	}
 	default:
 		return DefWindowProcA(hWnd, msg, wParam, lParam);
 	}
+}
+
+void UiApp::drawParseTree(HDC hdc, RECT rcClient) {
+	HBRUSH bg = CreateSolidBrush(RGB(245, 248, 255));
+	FillRect(hdc, &rcClient, bg);
+	DeleteObject(bg);
+
+	if (!astRoot) {
+		const char* hint = "Run Parse to visualize the AST";
+		TextOutA(hdc, rcClient.left + 8, rcClient.top + 8, hint, (int)strlen(hint));
+		return;
+	}
+	const int nodeR = 20;
+	const int nodeW = nodeR * 2 + 4;
+	const int hGap = 30;
+	const int vGap = 80;
+
+	auto colorFor = [](NodeType t) -> COLORREF {
+		switch (t) {
+		case N_PROGRAM: return RGB(99, 141, 255);
+		case N_STMT_LIST: return RGB(170, 120, 255);
+		case N_LET_STMT: return RGB(92, 201, 150);
+		case N_PRINT_STMT: return RGB(52, 199, 204);
+		case N_BIN_OP: return RGB(255, 170, 50);
+		case N_IDENT: return RGB(80, 180, 255);
+		case N_NUMBER: return RGB(255, 210, 70);
+		default: return RGB(200, 200, 200);
+		}
+	};
+	HPEN edgePen = CreatePen(PS_SOLID, 2, RGB(160, 180, 200));
+	HGDIOBJ oldPen = SelectObject(hdc, edgePen);
+
+	std::function<void(ASTNode*, int, int, int)> drawRec;
+	drawRec = [&](ASTNode* n, int leftX, int topY, int availableW) {
+		if (!n) return;
+		ASTNode* kids[64]; int kc = 0;
+		collectChildren(n, kids, kc);
+		int cx = leftX + availableW / 2;
+		int cy = topY + nodeR + 4;
+		// node fill
+		COLORREF c = colorFor(n->type);
+		HBRUSH br = CreateSolidBrush(c);
+		HGDIOBJ oldBr = SelectObject(hdc, br);
+		Ellipse(hdc, cx - nodeR, cy - nodeR, cx + nodeR, cy + nodeR);
+		SelectObject(hdc, oldBr);
+		DeleteObject(br);
+		// label
+		std::string lab; nodeLabel(n, lab);
+		drawCenteredText(hdc, cx, cy, lab);
+		if (kc == 0) return;
+		int childW[64];
+		int total = 0;
+		for (int i = 0; i < kc; ++i) {
+			childW[i] = subtreeWidthPx(kids[i], nodeW, hGap);
+			total += childW[i];
+			if (i + 1 < kc) total += hGap;
+		}
+		int startX = cx - total / 2;
+		for (int i = 0; i < kc; ++i) {
+			int cw = childW[i];
+			int ccx = startX + cw / 2;
+			int ccy = cy + vGap;
+			MoveToEx(hdc, cx, cy + nodeR, nullptr);
+			LineTo(hdc, ccx, ccy - nodeR);
+			drawRec(kids[i], startX, cy + vGap - nodeR, cw);
+			startX += cw + hGap;
+		}
+	};
+
+	int totalW = subtreeWidthPx(astRoot, nodeW, hGap);
+	if (totalW > (rcClient.right - rcClient.left - 16)) totalW = rcClient.right - rcClient.left - 16;
+	int left = rcClient.left + (rcClient.right - rcClient.left - totalW) / 2;
+	int top = rcClient.top + 16;
+	drawRec(astRoot, left, top, totalW);
+
+	SelectObject(hdc, oldPen);
+	DeleteObject(edgePen);
 }
 
 

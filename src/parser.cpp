@@ -84,7 +84,12 @@ ASTNode* Parser::parseStmt(string& err) {
 			return nullptr;
 		}
 		ASTNode* ident = new ASTNode(N_IDENT);
-		ident->text = consume().lexeme;
+		{
+			const Token tok = consume();
+			ident->text = tok.lexeme;
+			ident->line = tok.line;
+			ident->col = tok.col;
+		}
 		if (!expect(T_EQUAL, "'='", err)) { freeAST(ident); return nullptr; }
 		ASTNode* expr = parseExpr(err);
 		if (!expr) { freeAST(ident); return nullptr; }

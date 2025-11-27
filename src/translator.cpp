@@ -35,19 +35,9 @@ static void emitStmt(ASTNode* node, string& out) {
 			out += "\n";
 		}
 	} else if (node->type == N_PRINT_STMT) {
-		// If printing a bare identifier, emit a labeled print: print("name =", name)
-		if (node->left && node->left->type == N_IDENT) {
-			const std::string& name = node->left->text;
-			out += "print(\"";
-			out += name;
-			out += " = \", ";
-			out += name;
-			out += ")\n";
-		} else {
-			out += "print(";
-			emitExpr(node->left, out);
-			out += ")\n";
-		}
+		out += "print(";
+		emitExpr(node->left, out);
+		out += ")\n";
 	}
 }
 
@@ -58,6 +48,8 @@ bool translateToPython(ASTNode* root, string& outCode) {
 	ASTNode* cur = stmtList->left;
 	while (cur) {
 		emitStmt(cur, outCode);
+		// Add a blank line between statements for readability
+		outCode += "\n";
 		cur = cur->next;
 	}
 	return true;
