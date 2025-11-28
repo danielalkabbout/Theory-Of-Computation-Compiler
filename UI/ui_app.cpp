@@ -29,6 +29,7 @@
 #define IDC_EDIT_TRANS 1012
 #define IDC_AUTOGRAPH 1013
 
+
 static const char* kMainWndClass = "TC_GUI_MAIN";
 static const char* kParseGraphClass = "TC_GUI_PARSEGRAPH";
 
@@ -138,6 +139,9 @@ bool UiApp::createMainWindow(int nCmdShow) {
 }
 
 void UiApp::createChildControls() {
+
+
+
 	hComboAutomata = CreateWindowExA(0, "COMBOBOX", "",
 		CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE,
 		0, 0, 200, 200, hMainWnd, (HMENU)IDC_COMBO_AUTOMATA, hInst, nullptr);
@@ -183,6 +187,25 @@ void UiApp::createChildControls() {
 
 	hParseGraph = CreateWindowExA(0, kParseGraphClass, "",
 		WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, hMainWnd, nullptr, hInst, this);
+
+	// Create a modern font
+	hUIFont = CreateFontA(
+		18, 0, 0, 0, FW_NORMAL,
+		FALSE, FALSE, FALSE,
+		ANSI_CHARSET, OUT_DEFAULT_PRECIS,
+		CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+		VARIABLE_PITCH, "Segoe UI"
+	);
+
+	// Apply it to all controls
+	HWND ctrls[] = { hComboAutomata, hBtnLex, hBtnParse, hBtnSem, hBtnTrans,
+					 hBtnRunAll, hBtnSave, hEditSource, hEditTokens,
+					 hEditParse, hEditSemantics, hEditTrans };
+
+	for (HWND c : ctrls) {
+		SendMessageA(c, WM_SETFONT, (WPARAM)hUIFont, TRUE);
+	}
+
 
 	// Populate automaton combo
 	SendMessageA(hComboAutomata, CB_RESETCONTENT, 0, 0);
