@@ -40,6 +40,7 @@ static void richAppend(HWND hRich, const string& text, COLORREF color);
 #define IDC_BTN_RESET 1016
 #define IDC_BTN_THEME 1017
 
+
 static const char* kMainWndClass = "TC_GUI_MAIN";
 static const char* kParseGraphClass = "TC_GUI_PARSEGRAPH";
 static const char* kNfaGraphClass = "TC_GUI_NFAGRAPH";
@@ -278,10 +279,16 @@ bool UiApp::createMainWindow(int nCmdShow) {
 }
 
 void UiApp::createChildControls() {
+<<<<<<< HEAD
 	// Ensure RichEdit library is available (for colored semantics)
 	LoadLibraryA("Riched20.dll"); // OK if already loaded
 	// Ensure background brush exists
 	if (!hBgBrush) hBgBrush = CreateSolidBrush(bgColor);
+=======
+
+
+
+>>>>>>> 3624fb48deab9420b55360ad80d7b69a6ba44d48
 	hComboAutomata = CreateWindowExA(0, "COMBOBOX", "",
 		CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE,
 		0, 0, 200, 200, hMainWnd, (HMENU)IDC_COMBO_AUTOMATA, hInst, nullptr);
@@ -347,6 +354,25 @@ void UiApp::createChildControls() {
 		WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, hMainWnd, nullptr, hInst, this);
 	hDfaGraph = CreateWindowExA(0, kDfaGraphClass, "",
 		WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, hMainWnd, nullptr, hInst, this);
+
+	// Create a modern font
+	hUIFont = CreateFontA(
+		18, 0, 0, 0, FW_NORMAL,
+		FALSE, FALSE, FALSE,
+		ANSI_CHARSET, OUT_DEFAULT_PRECIS,
+		CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+		VARIABLE_PITCH, "Segoe UI"
+	);
+
+	// Apply it to all controls
+	HWND ctrls[] = { hComboAutomata, hBtnLex, hBtnParse, hBtnSem, hBtnTrans,
+					 hBtnRunAll, hBtnSave, hEditSource, hEditTokens,
+					 hEditParse, hEditSemantics, hEditTrans };
+
+	for (HWND c : ctrls) {
+		SendMessageA(c, WM_SETFONT, (WPARAM)hUIFont, TRUE);
+	}
+
 
 	// Populate automaton combo
 	SendMessageA(hComboAutomata, CB_RESETCONTENT, 0, 0);
