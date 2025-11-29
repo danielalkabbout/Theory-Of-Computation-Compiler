@@ -55,7 +55,13 @@ static unsigned int moveOn(const NFA& nfa, unsigned int set, int inputClass) {
 bool determinizeNFA(const NFA& nfa, Automaton& outDfa) {
 	std::memset(&outDfa, 0, sizeof(Automaton));
 	outDfa.id = 2;
+	// Safe copy for name to avoid C4996 on MSVC
+#if defined(_MSC_VER)
+	strncpy_s(outDfa.name, sizeof(outDfa.name), "DeterminizedDFA", _TRUNCATE);
+#else
 	std::strncpy(outDfa.name, "DeterminizedDFA", sizeof(outDfa.name) - 1);
+	outDfa.name[sizeof(outDfa.name) - 1] = '\0';
+#endif
 
 	// Map from subset bitset to DFA state index
 	unsigned int subsetOfState[MAX_STATES] = { 0 };

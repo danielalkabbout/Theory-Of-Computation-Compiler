@@ -279,16 +279,10 @@ bool UiApp::createMainWindow(int nCmdShow) {
 }
 
 void UiApp::createChildControls() {
-<<<<<<< HEAD
 	// Ensure RichEdit library is available (for colored semantics)
 	LoadLibraryA("Riched20.dll"); // OK if already loaded
 	// Ensure background brush exists
 	if (!hBgBrush) hBgBrush = CreateSolidBrush(bgColor);
-=======
-
-
-
->>>>>>> 3624fb48deab9420b55360ad80d7b69a6ba44d48
 	hComboAutomata = CreateWindowExA(0, "COMBOBOX", "",
 		CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE,
 		0, 0, 200, 200, hMainWnd, (HMENU)IDC_COMBO_AUTOMATA, hInst, nullptr);
