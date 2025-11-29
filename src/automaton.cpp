@@ -61,7 +61,7 @@ int classifyChar(char c) {
 	if (c == '_') return IC_UNDERSCORE;
 	if (c == ' ' || c == '\t' || c == '\n' || c == '\r') return IC_WHITESPACE;
 	if (c == '+' || c == '-' || c == '*' || c == '/' || c == '=') return IC_OPERATOR;
-	if (c == '(' || c == ')' || c == ';' || c == '{' || c == '}' || c == ',') return IC_DELIM;
+	if (c == '(' || c == ')' || c == ';' || c == '{' || c == '}' || c == ',' || c == '[' || c == ']') return IC_DELIM;
 	if (c == '.') return IC_DOT;
 	return IC_OTHER;
 }

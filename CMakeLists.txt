@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(tc_backend
     src/main.cpp
     src/automaton.cpp
+    src/nfa.cpp
     src/lexer.cpp
     src/parser.cpp
     src/semantic.cpp
@@ -20,6 +21,7 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/UI/win_main.cpp")
         UI/win_main.cpp
         UI/ui_app.cpp
         src/automaton.cpp
+        src/nfa.cpp
         src/lexer.cpp
         src/parser.cpp
         src/semantic.cpp
