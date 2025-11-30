@@ -359,13 +359,28 @@ void UiApp::createChildControls() {
 	);
 
 	// Apply it to all controls
-	HWND ctrls[] = { hComboAutomata, hBtnLex, hBtnParse, hBtnSem, hBtnTrans,
-					 hBtnRunAll, hBtnSave, hEditSource, hEditTokens,
-					 hEditParse, hEditSemantics, hEditTrans };
+	// Apply it to all controls
+	HWND ctrls[] = {
+		hComboAutomata,
+		hBtnLex, hBtnParse, hBtnSem, hBtnTrans,
+		hBtnRunAll, hBtnSave,
+		hChkTrace,            // <-- Missing before
+		hBtnStep, hBtnReset,  // <-- Missing
+		hBtnTheme,            // <-- Missing theme toggle
+		hTab,                 // <-- Apply font to tab control
+
+		// Edits
+		hEditSource, hEditTokens,
+		hEditParse, hEditSemantics, hEditTrans,
+
+		// Graphs (optional but good)
+		hParseGraph, hNfaGraph, hDfaGraph
+	};
 
 	for (HWND c : ctrls) {
-		SendMessageA(c, WM_SETFONT, (WPARAM)hUIFont, TRUE);
+		if (c) SendMessageA(c, WM_SETFONT, (WPARAM)hUIFont, TRUE);
 	}
+
 
 
 	// Populate automaton combo
