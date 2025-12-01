@@ -95,6 +95,39 @@ static string toCRLF(const string& s) {
 	return out;
 }
 
+// Collapse extra blank lines: replace multiple consecutive line breaks with a single one
+static string collapseExtraBlankLines(const string& s) {
+	string out;
+	out.reserve(s.size());
+	size_t i = 0;
+	while (i < s.size()) {
+		// Handle CRLF sequences
+		if (i + 1 < s.size() && s[i] == '\r' && s[i + 1] == '\n') {
+			// write exactly one CRLF
+			out.push_back('\r');
+			out.push_back('\n');
+			i += 2;
+			// skip any additional CRLF pairs
+			while (i + 1 < s.size() && s[i] == '\r' && s[i + 1] == '\n') {
+				i += 2;
+			}
+			// also collapse stray lone LFs that may follow
+			while (i < s.size() && s[i] == '\n') {
+				++i;
+			}
+		} else if (s[i] == '\n') {
+			// write a single LF and skip extra LFs
+			out.push_back('\n');
+			++i;
+			while (i < s.size() && s[i] == '\n') ++i;
+		} else {
+			out.push_back(s[i]);
+			++i;
+		}
+	}
+	return out;
+}
+
 // Simple file writer for text outputs
 static bool writeTextFile(const char* path, const string& data) {
 	FILE* f = nullptr;
@@ -107,6 +140,17 @@ static bool writeTextFile(const char* path, const string& data) {
 	fwrite(data.data(), 1, data.size(), f);
 	fclose(f);
 	return true;
+}
+
+// Timestamp string for unique filenames: YYYYMMDD_HHMMSS
+static string nowTimestamp() {
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%04u%02u%02u_%02u%02u%02u",
+		(unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
+		(unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond);
+	return string(buf);
 }
 
 // Render a drawer into an in-memory 32-bit DIB and save as BMP
@@ -597,7 +641,8 @@ void UiApp::onTranslate() {
 	}
 	translationDone = true;
 	string crlf = toCRLF(translatedPython);
-	setEditText(hEditTrans, crlf);
+	string compact = collapseExtraBlankLines(crlf);
+	setEditText(hEditTrans, compact);
 }
 
 void UiApp::onRunAll() {
@@ -627,22 +672,25 @@ void UiApp::onSaveTranslation() {
 	const char* outDir = "UI\\Saved Files";
 	CreateDirectoryA(outDirParent, nullptr); // ensure UI exists (OK if already exists)
 	CreateDirectoryA(outDir, nullptr);       // ensure Saved Files exists
-	auto pathInOutDir = [&](const char* name) -> std::string {
+	auto pathInOutDir = [&](const std::string& name) -> std::string {
 		std::string p(outDir);
 		p += "\\";
 		p += name;
 		return p;
 	};
 
+	// Unique suffix for this save
+	std::string ts = nowTimestamp();
+
 	// 1) translation.py
 	if (translationDone) {
-		(void)writeTextFile(pathInOutDir("translation.py").c_str(), translatedPython);
+		(void)writeTextFile(pathInOutDir(std::string("translation_") + ts + ".py").c_str(), translatedPython);
 	}
 
 	// 2) tokens.txt
 	string tokensText;
 	appendTokensTo(tokensText);
-	writeTextFile(pathInOutDir("tokens.txt").c_str(), toCRLF(tokensText));
+	writeTextFile(pathInOutDir(std::string("tokens_") + ts + ".txt").c_str(), toCRLF(tokensText));
 
 	// 3) ast.txt
 	string astText;
@@ -651,7 +699,7 @@ void UiApp::onSaveTranslation() {
 	} else {
 		astText = "AST not available. Run Parse first.\r\n";
 	}
-	writeTextFile(pathInOutDir("ast.txt").c_str(), toCRLF(astText));
+	writeTextFile(pathInOutDir(std::string("ast_") + ts + ".txt").c_str(), toCRLF(astText));
 
 	// 4) semantics.txt (includes errors and warnings)
 	string semText;
@@ -688,27 +736,27 @@ void UiApp::onSaveTranslation() {
 	} else {
 		semText = "Semantics not run. Run Semantics (or Run All) first.\r\n";
 	}
-	writeTextFile(pathInOutDir("semantics.txt").c_str(), toCRLF(semText));
+	writeTextFile(pathInOutDir(std::string("semantics_") + ts + ".txt").c_str(), toCRLF(semText));
 
 	// 5) dfa.txt (determinized DFA or selected DFA as fallback)
 	string dfaText;
 	if (dfaFromNfa.numStates > 0) dfaText = automatonToString(dfaFromNfa);
 	else if (selectedAutomaton) dfaText = automatonToString(*selectedAutomaton);
 	else dfaText = "No DFA available.\r\n";
-	writeTextFile(pathInOutDir("dfa.txt").c_str(), toCRLF(dfaText));
+	writeTextFile(pathInOutDir(std::string("dfa_") + ts + ".txt").c_str(), toCRLF(dfaText));
 
 	// 6) nfa.txt (textual listing with eps)
 	string nfaText = nfaToString(nfa);
-	writeTextFile(pathInOutDir("nfa.txt").c_str(), toCRLF(nfaText));
+	writeTextFile(pathInOutDir(std::string("nfa_") + ts + ".txt").c_str(), toCRLF(nfaText));
 
 	// 7) Images: nfa.bmp, dfa.bmp, parse_tree.bmp
 	RECT tabRc; GetClientRect(hTab, &tabRc); TabCtrl_AdjustRect(hTab, FALSE, &tabRc);
 	int imgW = (tabRc.right - tabRc.left); if (imgW < 640) imgW = 640;
 	int imgH = (tabRc.bottom - tabRc.top); if (imgH < 360) imgH = 360;
 
-	saveDrawnImageToBMP(pathInOutDir("nfa.bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) { this->drawNfa(hdc, rc); });
-	saveDrawnImageToBMP(pathInOutDir("dfa.bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) { this->drawDfa(hdc, rc); });
-	saveDrawnImageToBMP(pathInOutDir("parse_tree.bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) {
+	saveDrawnImageToBMP(pathInOutDir(std::string("nfa_") + ts + ".bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) { this->drawNfa(hdc, rc); });
+	saveDrawnImageToBMP(pathInOutDir(std::string("dfa_") + ts + ".bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) { this->drawDfa(hdc, rc); });
+	saveDrawnImageToBMP(pathInOutDir(std::string("parse_tree_") + ts + ".bmp").c_str(), imgW, imgH, [this](HDC hdc, RECT rc) {
 		if (this->parsedOk && this->parserPtr && this->astRoot) {
 			// Reuse the existing printer by drawing text into the image
 			string s; this->formatASTTo(s);
@@ -722,19 +770,18 @@ void UiApp::onSaveTranslation() {
 		}
 	});
 
-	MessageBoxA(hMainWnd,
-		"Saved files in folder 'UI\\Saved Files':\r\n"
-		"  translation.py (if available)\r\n"
-		"  tokens.txt\r\n"
-		"  ast.txt\r\n"
-		"  semantics.txt\r\n"
-		"  dfa.txt\r\n"
-		"  nfa.txt\r\n"
-		"Images:\r\n"
-		"  nfa.bmp\r\n"
-		"  dfa.bmp\r\n"
-		"  parse_tree.bmp",
-		"Save", MB_OK | MB_ICONINFORMATION);
+	std::string mb = std::string("Saved files in folder 'UI\\Saved Files' with suffix _") + ts + ":\r\n";
+	if (translationDone) mb += "  translation_" + ts + ".py\r\n";
+	mb += "  tokens_" + ts + ".txt\r\n";
+	mb += "  ast_" + ts + ".txt\r\n";
+	mb += "  semantics_" + ts + ".txt\r\n";
+	mb += "  dfa_" + ts + ".txt\r\n";
+	mb += "  nfa_" + ts + ".txt\r\n";
+	mb += "Images:\r\n";
+	mb += "  nfa_" + ts + ".bmp\r\n";
+	mb += "  dfa_" + ts + ".bmp\r\n";
+	mb += "  parse_tree_" + ts + ".bmp";
+	MessageBoxA(hMainWnd, mb.c_str(), "Save", MB_OK | MB_ICONINFORMATION);
 }
 
 void UiApp::onAutomatonChanged() {

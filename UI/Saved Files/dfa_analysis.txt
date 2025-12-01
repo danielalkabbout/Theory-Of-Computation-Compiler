@@ -1,0 +1,98 @@
+DFA analysis for example.src
+
+Program under analysis
+let x = 10;
+let c = 22;
+let y = (x * (c + 10)) * x;
+print(y);
+
+
+1) DFA summary (used by the lexer)
+- Deterministic finite automaton (no epsilon edges).
+- One active state at any time; exactly one transition per input class.
+- Linear time in input size; constant memory.
+
+Input classes
+- LETTER: a–z, A–Z
+- DIGIT: 0–9
+- UNDERSCORE: _
+- WS: space, tab, newline, carriage return
+- OP: + - * / =
+- DELIM: ( ) { } , ; [ ]
+
+Key states (conceptual)
+- S0 (start, non-accepting): first character dispatch.
+- S1 (accept IDENT): loops on LETTER/DIGIT/UNDERSCORE. Used for identifiers and (after post-processing) keywords.
+- S2 (accept NUMBER): loops on DIGIT (integers).
+- S3 (accept WS): loops on WS; tokens produced are usually skipped by the lexer.
+- S4 (accept OP): single-character operators.
+- S5 (accept DELIM): single-character punctuation.
+
+Note on keywords
+- The DFA recognizes keyword lexemes (e.g., "let", "print") as IDENT in S1.
+- After the lexeme is formed, the lexer post-processes and remaps them to tokens KW_LET and KW_PRINT. This is standard practice.
+
+
+2) Tokenization walkthrough (by line)
+
+Line 1: let x = 10;
+- "let": S0→S1 on LETTER; S1 loops on LETTER, LETTER; accept IDENT → remap to KW_LET.
+- WS: S0→S3, loop; skipped.
+- "x": S0→S1 on LETTER; accept IDENT.
+- WS: S0→S3, loop; skipped.
+- "=": S0→S4; accept OP("=").
+- WS: S0→S3, loop; skipped.
+- "10": S0→S2 on DIGIT; S2 loop on DIGIT; accept NUMBER("10").
+- ";": S0→S5; accept DELIM(";").
+
+Line 2: let c = 22;
+- Same pattern: KW_LET, IDENT("c"), OP("="), NUMBER("22"), DELIM(";"), with WS in between.
+
+Line 3: let y = (x * (c + 10)) * x;
+- "let": IDENT → KW_LET via post-processing.
+- "y": IDENT.
+- "=": OP.
+- "(": DELIM.
+- "x": IDENT.
+- "*": OP.
+- "(": DELIM.
+- "c": IDENT.
+- "+": OP.
+- "10": NUMBER.
+- ")": DELIM.
+- ")": DELIM.
+- "*": OP.
+- "x": IDENT.
+- ";": DELIM.
+
+Line 4: print(y);
+- "print": IDENT in S1 across LETTERs → remapped to KW_PRINT.
+- "(": DELIM.
+- "y": IDENT.
+- ")": DELIM.
+- ";": DELIM.
+
+
+3) Why the red (trace) edges appear in the DFA view
+- S0→S1 and S1 self-loop: exercised by "let", "c", "y", "x", "print".
+- S0→S2 and S2 self-loop: exercised by "10", "22", "10".
+- S0→S4: exercised by operators "=", "+", "*".
+- S0→S5: exercised by delimiters "(", ")", ";".
+- S0→S3: exercised by spaces/newlines between tokens.
+
+
+4) Correctness for this program
+- Recognizes all required token categories: keywords (via remap), identifiers, integers, operators (= + *), delimiters (() and ); semicolon ;, and whitespace.
+- Determinized (no epsilon transitions), so each consumed character advances along exactly one edge.
+
+
+5) Limitations / scope notes
+- Numbers: integers only (no decimal point handling in this DFA path).
+- Operators: single-character set {=,+,-,*,/}. No multi-character operators (==, <=, +=, etc.).
+- Comments are not recognized by this DFA (not part of provided classes).
+
+
+6) Bottom line
+- The DFA is the correct determinized form for the lexer’s needs on this language subset.
+- The observed trace on your input aligns with expected tokenization and explains the highlighted red edges you see in the DFA tab.
+

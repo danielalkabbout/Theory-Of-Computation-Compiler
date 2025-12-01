@@ -1,0 +1,198 @@
+Project overview
+A small compiler pipeline with a Win32 GUI:
+- Lexing (tokens) → Parsing (AST) → Semantic analysis (errors/warnings) → Translation (Python)
+- Visual automata views: NFA and DFA in separate tabs
+- A parse tree drawn as a real tree (circles and edges)
+- Save/export of all artifacts (text and BMP images)
+- Dark/Light theme toggle, trace highlighting on automata
+
+How data flows
+1. Source text is read from the left edit box.
+2. Lexing produces TokenList.
+3. Parsing consumes tokens to build an ASTNode tree.
+4. Semantic analysis walks the AST and symbol table to emit errors/warnings.
+5. Translation converts the AST to Python if no semantic errors.
+6. Visuals:
+   - Parse tree: node graph with edges
+   - NFA: nondeterministic automaton with epsilon edges
+   - DFA: determinized automaton from the NFA
+   - Optional trace highlighting along the path taken by input
+
+
+Files and responsibilities
+
+Build
+- CMakeLists.txt
+  - Builds backend (tc_backend) and GUI (tc_gui)
+  - Links GUI with user32, gdi32, Comctl32
+  - Adds src/nfa.cpp to targets
+  - Only builds GUI if UI/win_main.cpp exists (prevents WinMain linker errors)
+
+GUI layer
+- UI/win_main.cpp
+  - Win32 entry point (WinMain)
+  - Instantiates and runs the UI app (UiApp)
+
+- UI/ui_app.h
+  - Declares the UiApp class, window/control handles, theme colors
+  - Declares drawing helpers and window procedures for the canvases
+  - Holds NFA/DFA state, trace flags and buffers
+  - Guards/undefs macros to avoid name collisions (WIN32_LEAN_AND_MEAN, NOMINMAX, #undef for type, Token, TokenType)
+
+- UI/ui_app.cpp
+  - Includes lexer.h and RichEdit; using namespace std;
+  - Registers four window classes:
+    - Main window (kMainWndClass)
+    - Parse tree canvas (kParseGraphClass)
+    - NFA canvas (kNfaGraphClass)
+    - DFA canvas (kDfaGraphClass)
+  - Creates all controls:
+    - Combo (automaton select), buttons: Lex, Parse, Semantics, Translate, Run All, Save, Dark Mode; trace controls (checkbox, Step, Reset); Tab control with pages: Tokens, Parse Tree, Semantics (RichEdit), Translation, DFA, NFA
+  - Font setup: applies a modern font to all controls/canvases
+  - Theme:
+    - Dark/Light toggle; tracks bgColor, fgColor, hBgBrush
+    - Custom colors via WM_CTLCOLOR* handlers
+  - Pipeline handlers:
+    - onLex(): tokenizes input, fills “Tokens”, recomputes trace, refreshes DFA/NFA
+    - onParse(): builds AST, renders textual tree, resets downstream state
+    - onSemantics(): runs analysis; shows colored errors (red) and warnings (yellow) in RichEdit; only disables Translate on errors
+    - onTranslate(): generates Python when no semantic errors
+    - onRunAll(): runs Lex → Parse → Semantics → Translate from a clean state and switches to the Translation tab on success
+    - onSaveTranslation(): exports:
+      - Text files: translation.py, tokens.txt, ast.txt, semantics.txt, dfa.txt, nfa.txt
+      - BMP images: nfa.bmp, dfa.bmp, parse_tree.bmp (top-down BMPs; correct orientation)
+      - Destination folder: UI\Saved Files
+    - onAutomatonChanged(): rebuilds the NFA from the lexer spec, determinizes to DFA, recomputes trace, redraws
+  - Drawing functions:
+    - Parse tree:
+      - drawParseTree(HDC, RECT): paints node-circles, colors per node type, label text centered in each node; tree edges
+      - Helpers: nodeLabel, collectChildren, subtreeWidthPx, drawCenteredText
+    - Automata:
+      - drawNfa(HDC, RECT): state circles; solid edges for input classes; dashed edges for epsilon; self-loops as curved arcs; legend; start arrow; highlights traced edges (red)
+      - drawDfa(HDC, RECT): same layout but no epsilon edges; legend; start arrow; traced edges (red)
+      - Helpers: drawSelfLoop, drawLegend, drawStartArrow
+  - Trace:
+    - recomputeNfaTrace(): simulates over the selected DFA (determinized NFA or fallback) to mark usedEdge[state][inputClass]
+    - recomputeTrace(): toggle-sensitive wrapper
+    - UI: “Trace” checkbox, “Step”, and “Reset” buttons
+  - Text utilities:
+    - appendTokensTo(string&): formats tokens for the Tokens tab
+    - formatASTTo(string&): builds a readable ASCII tree (used for text export and fallback)
+    - setEditText(HWND, const string&): sets edit text
+    - richAppend(HWND, const string&, COLORREF): colored text append for RichEdit
+    - toCRLF(const string&): normalize LF to CRLF for Windows controls/files
+    - writeTextFile(const char*, const string&): file writing
+    - saveDrawnImageToBMP(const char*, int, int, drawer): off-screen render + save to BMP (top-down)
+
+Lexing and automata
+- include/lexer.h
+  - enum TokenType: token kinds (EOF, IDENT, NUMBER, keywords, operators, punctuation, etc.)
+  - struct Token: tokType, lexeme, line, col
+  - struct TokenList: fixed-capacity token buffer with push, at, count
+  - API:
+    - bool lex(const std::string&, const Automaton&, TokenList&, std::string& errorMsg);
+    - std::string tokenTypeToString(TokenType);
+    - void printTokens(const TokenList&);
+  - Macro guards/undefs to prevent Windows macro collisions
+
+- src/lexer.cpp (expected)
+  - Implements lex using the DFA to classify characters and produce Tokens
+  - Tracks line/column for diagnostics
+  - Post-processes identifiers into keywords (let, print), etc.
+
+- include/automaton.h / src/automaton.cpp
+  - DFA structure:
+    - State count, accepting states
+    - transitionTable[state][inputClass]
+  - Character classifier classifyChar(char) to one of input classes (LETTER, DIGIT, UNDERSCORE, WS, OP, DELIM, etc.)
+  - nextState(const Automaton&, int state, int inputClass)
+  - Initialization of a base lexer DFA or useful helpers
+
+- include/nfa.h / src/nfa.cpp
+  - NFA structure:
+    - Per-state transitions for input classes plus epsilon
+    - EPSILON_IC and NUM_INPUT_CLASSES
+  - Construction and determinization:
+    - buildLexerNFA(NFA& out): didactic NFA submachines for IDENT, NUMBER, WS, OP, DELIM (with LETTER/_/DIGIT loops for identifiers, DIGIT loops for numbers, WS loops)
+    - epsilonClosure(set), moveOn(set, ic): standard NFA operations
+    - determinizeNFA(const NFA&, Automaton&): subset construction
+  - Safe string copies to address MSVC warning (strncpy_s where available)
+
+Parsing and AST
+- include/parser.h
+  - enum NodeType: PROGRAM, STMT_LIST, LET_STMT, PRINT_STMT, BIN_OP, IDENT, NUMBER
+  - struct ASTNode:
+    - type, text, line, col
+    - left, right, next (list linkage for statement sequences)
+  - class Parser:
+    - Constructor: Parser(const TokenList&)
+    - Public: ASTNode* parseProgram(), void printAST(ASTNode*), static void freeAST(ASTNode*)
+    - Private: cursor (pos), token accessors (peek, consume), predicates (match, expect), nonterminals (parseStmtList, parseStmt, parseExpr, parseTerm, parseFactor)
+  - Macro guards/undefs to avoid TokenType conflicts
+
+- src/parser.cpp
+  - Implements recursive-descent parser:
+    - parseProgram: STMT_LIST then EOF
+    - parseStmtList: zero or more statements; builds a N_STMT_LIST whose left points to the head; statements chained via next
+    - parseStmt: recognizes let assignments and print(expr);
+    - parseExpr/parseTerm/parseFactor: precedence-aware expression grammar for +, *, parentheses, identifiers, numbers
+    - Fills line, col from tokens
+    - Diagnostics with token position on failures
+
+Semantic analysis
+- include/semantic.h
+  - SemanticError with message, line, column
+  - SemanticResult with ok, arrays of errors and warnings, counters
+  - SymbolTable: definitions with line, col, and a used flag
+  - SemanticResult analyzeSemantics(ASTNode*, SymbolTable&)
+
+- src/semantic.cpp
+  - addError, addWarning helpers
+  - analyzeStmt: registers new variables on let, analyzes RHS
+  - analyzeExpr: flags undefined identifiers, marks used symbols
+  - After traversal: emits warnings for unused variables
+  - Warnings never block translation; errors do
+
+Translation
+- src/translator.cpp
+  - bool translateToPython(ASTNode*, std::string& out): traverses AST to produce Python code
+  - Mirrors the supported subset of the language (let/print/expressions)
+
+Example and docs
+- example.src
+  - Sample program exercising identifiers, numbers, operators, punctuation, and keywords (let, print)
+
+- README.md
+  - Project description, build steps, and usage notes (tabs, buttons, save output, etc.)
+
+
+Important conventions and fixes
+- Windows macro collisions (e.g., type, Token, TokenType) are neutralized:
+  - WIN32_LEAN_AND_MEAN, NOMINMAX, and #undef of conflicting macro names in public headers and UI files
+- UI/ui_app.cpp uses using namespace std; per requirement (removes std:: prefixes within that file)
+- Top-down BMP saving ensures images aren’t vertically flipped
+- NFA and DFA are drawn distinctly:
+  - NFA: dashed epsilon edges, explicit “eps” labels
+  - DFA: no epsilon edges
+  - Self-loops drawn as curved arcs
+  - Legend and start-arrow included
+  - Trace path highlighting (red) driven by the current input text
+- Semantics tab uses RichEdit with colored sections:
+  - Errors: red; Warnings: yellow; Summary/headers: default color
+- Translate is disabled only when semantic errors exist; warnings do not block
+
+
+How to use the app
+- Type your program in the left “Source” box
+- Click:
+  - Lex → shows tokens
+  - Parse → builds AST and shows parse tree (graphical tab)
+  - Semantics → runs checks; shows colored messages; enables Translate if no errors
+  - Translate → shows generated Python
+  - Run All → runs all stages from scratch and switches to Translation on success
+- Switch tabs to view DFA/NFA drawings; use Trace/Step/Reset to visualize execution
+- Save → exports text artifacts and BMP images to UI\Saved Files
+- Dark Mode → toggles theme across the UI and canvases
+
+If you want this report in another format (PDF/Markdown/HTML), say which and I’ll generate it.
+

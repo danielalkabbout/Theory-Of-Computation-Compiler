@@ -1,0 +1,93 @@
+NFA analysis for example.src
+
+Program under analysis
+let x = 10;
+let c = 22;
+let y = (x * (c + 10)) * x;
+print(y);
+
+
+1) NFA summary (structure you see in the NFA tab)
+- This is a nondeterministic finite automaton designed for lexing.
+- Start state S0 has ε-transitions to five sub‑machines that each recognize a token family:
+  • IDENT sub‑NFA (starts at S1) — identifiers/keywords
+  • NUMBER sub‑NFA (starts at S2) — integer literals
+  • WS sub‑NFA (starts at S3) — whitespace
+  • OP sub‑NFA (S4 → S6) — single‑character operators
+  • DELIM sub‑NFA (S5 → S7) — punctuation/delimiters
+- Dashed edges are ε (epsilon) transitions (no character consumed).
+- Solid edges are consuming transitions labeled by input classes.
+
+Input classes (as shown in the legend)
+- LETTER: a–z, A–Z
+- DIGIT: 0–9
+- UNDERSCORE: _
+- WS: space, tab, newline, carriage return
+- OP: + - * / =
+- DELIM: ( ) { } , ; [ ]
+
+Accepting states (conceptual)
+- S1: IDENT (loops on LETTER/DIGIT/UNDERSCORE; accepting)
+- S2: NUMBER (loops on DIGIT; accepting)
+- S3: WS (loops on WS; accepting; tokens often skipped later)
+- S6: OP (reached by S4 --OP--> S6; accepting)
+- S7: DELIM (reached by S5 --DELIM--> S7; accepting)
+
+
+2) How the NFA recognizes tokens (intuition)
+- From S0, ε‑closure immediately enables all sub‑NFAs: S1/S2/S3/S4/S5 are “active” before reading a character.
+- On each input character, any active state with a matching class can advance:
+  • If the char is a LETTER (or ‘_’), the IDENT machine at S1 advances and stays in S1 (it loops).
+  • If it’s a DIGIT, the NUMBER machine at S2 advances and may stay in S2 (loop).
+  • If it’s whitespace, the WS machine at S3 advances and may stay in S3.
+  • If it’s an operator, S4 consumes it to S6.
+  • If it’s a delimiter, S5 consumes it to S7.
+- After each step, ε‑closure is taken again (re‑enabling choices where appropriate).
+- A token ends where at least one active branch is in an accepting state and the next char would break that branch; the lexer chooses the longest match, then classifies by which acceptor was reached. Keywords are produced by remapping IDENT lexemes such as "let", "print".
+
+
+3) Walkthrough on the current program
+Line 1: let x = 10;
+- ‘l’ (LETTER): IDENT branch (S1) consumes; NUMBER/WS/OP/DELIM branches die on this char.
+- ‘e’, ‘t’: S1 loop continues; accept IDENT("let") → remap to KW_LET.
+- space: WS branch (S3) consumes in a loop; typically skipped.
+- ‘x’: IDENT path (S1) → IDENT("x").
+- space: WS loop (S3); skipped.
+- ‘=’: OP path S4 --OP--> S6 (accept OP("=")).
+- space: WS loop.
+- ‘1’, ‘0’: NUMBER path S2 loop (accept NUMBER("10")).
+- ‘;’: DELIM path S5 --DELIM--> S7 (accept DELIM(";")).
+
+Line 2: let c = 22;
+- Same pattern as Line 1 with IDENT("c"), NUMBER("22").
+
+Line 3: let y = (x * (c + 10)) * x;
+- IDENT("let") → KW_LET, IDENT("y"), OP("="),
+- ‘(’ DELIM, IDENT("x"), ‘*’ OP, ‘(’ DELIM, IDENT("c"), ‘+’ OP, NUMBER("10"), ‘)’ DELIM, ‘)’ DELIM, ‘*’ OP, IDENT("x"), ‘;’ DELIM.
+
+Line 4: print(y);
+- IDENT("print") → KW_PRINT, DELIM("("), IDENT("y"), DELIM(")"), DELIM(";").
+
+
+4) Why you see dashed ε edges from S0
+- They model “try all token families at once” without consuming input; this is the classic way to combine sub‑NFAs in a lexer.
+- Determinization (subset construction) will fold these ε choices into combined DFA states (as shown in the DFA tab).
+
+
+5) Relationship to the DFA
+- The DFA shown in the other tab is the determinized form of this NFA via subset construction:
+  • ε‑closure of S0 (which includes S1/S2/S3/S4/S5) becomes the DFA start state.
+  • For each input class, moves from the entire active set are taken, then ε‑closed, forming a unique next DFA state.
+- In the DFA, ε transitions disappear and each state has at most one outgoing edge per input class.
+
+
+6) Correctness and scope notes
+- Correct for this language subset: identifiers (letters/digits/_), integers, whitespace, single‑char operators (= + - * /), and delimiters (() ) { } , ; [ ].
+- Keywords are handled after the IDENT token is formed (not by specialized NFA branches), which is standard.
+- Scope limits: integers only (no floats in this NFA), no multi‑char operators, no comments.
+
+
+7) Bottom line
+- The NFA uses ε from S0 to enable all token families in parallel, then accepts via the first suitable sub‑machine.
+- The diagram’s dashed ε edges and solid labeled edges match this construction; your program’s characters activate IDENT/NUMBER/WS/OP/DELIM branches exactly as expected.
+
