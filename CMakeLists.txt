@@ -35,3 +35,15 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/UI/win_main.cpp")
     endif()
 endif()
 
+# Tests (console executable)
+add_executable(tc_tests
+    tests/test_compiler.cpp
+    src/automaton.cpp
+    src/nfa.cpp
+    src/lexer.cpp
+    src/parser.cpp
+    src/semantic.cpp
+    src/translator.cpp
+)
+target_include_directories(tc_tests PRIVATE include)
+
