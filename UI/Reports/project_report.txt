@@ -182,6 +182,79 @@ Important conventions and fixes
 - Translate is disabled only when semantic errors exist; warnings do not block
 
 
+Test cases
+The project includes a comprehensive test suite (tests/test_compiler.cpp) that validates core functionality across all compiler pipeline stages. The test runner reports PASS/FAIL for each test and provides a summary at the end.
+
+Automaton tests (automaton.h)
+1. Character classification:
+   - classifyChar('a') returns IC_LETTER
+   - classifyChar(']') returns IC_DELIM
+2. DFA initialization:
+   - initLexerAutomaton creates 6 states
+   - State 1 (IDENT) is marked as accepting
+3. State transitions:
+   - nextState: START + LETTER transitions to IDENT state
+   - nextState: NUMBER + DIGIT loops back to NUMBER state
+4. Accepting state checks:
+   - isAccepting returns true for IDENT state
+   - isAccepting returns false for START state
+5. String representation:
+   - automatonToString produces header with "Automaton ID:"
+   - Output includes state count "States: 6"
+
+NFA tests (nfa.h)
+1. DFA to NFA conversion:
+   - buildNFAFromDFA preserves state count from DFA
+   - NFA contains transition 0--LETTER-->1 (single edge)
+2. Lexer NFA construction:
+   - buildLexerNFA creates 8 states
+   - Five states are marked as accepting (IDENT, NUMBER, WS, OP, DELIM)
+3. NFA determinization:
+   - determinizeNFA returns true on success
+   - Produced DFA contains at least one state
+
+Lexer tests (lexer.h)
+1. Tokenization:
+   - lex("let x=10;") successfully tokenizes simple program
+   - Output contains KW_LET token for "let" keyword
+   - Output contains NUMBER token for "10"
+2. Token type strings:
+   - tokenTypeToString(T_PLUS) returns "PLUS"
+   - tokenTypeToString(T_RPAREN) returns "RPAREN"
+
+Parser tests (parser.h)
+1. Valid program parsing:
+   - parseProgram("let x=1; print(x);") returns non-null AST
+   - AST structure correctly represents the program
+2. Invalid program handling:
+   - parseProgram("let = 1;") returns nullptr (missing identifier)
+   - Parser correctly rejects malformed syntax
+
+Semantic analysis tests (semantic.h)
+1. Valid program semantics:
+   - analyzeSemantics on "let x=1; print(x);" returns ok=true
+   - No errors reported for properly defined and used variables
+2. Undefined variable detection:
+   - analyzeSemantics on "print(y);" returns ok=false (y undefined)
+   - Error count is greater than 0 for undefined identifier
+
+Translation tests (translator.h)
+1. Simple translation:
+   - translateToPython on "let x=1; print(x);" returns true
+   - Output contains "x = 1" assignment
+   - Output contains "print(x)" function call
+2. Arithmetic expression translation:
+   - translateToPython on "let c=2; let y = (c + 10) * 2; print(y);" returns true
+   - Output contains "c = 2" assignment
+   - Output contains "print(y)" with correct variable reference
+   - Arithmetic expressions are correctly translated
+
+Test execution
+- Build: The test executable (tc_tests) is built via CMakeLists.txt
+- Run: Execute the test binary to see PASS/FAIL results for each test case
+- Output: Summary shows total passed and failed tests, returns exit code 0 if all pass
+
+
 How to use the app
 - Type your program in the left “Source” box
 - Click:

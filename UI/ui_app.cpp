@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <cstring>
+#include <queue>
 #include <richedit.h>
 
 using namespace std;
@@ -266,8 +267,14 @@ bool UiApp::initBackend() {
 	selectedAutomaton = automatonManager.findById(1);
 	if (selectedAutomaton) { buildLexerNFA(nfa); determinizeNFA(nfa, dfaFromNfa); }
 	traceEnabled = true;
-	traceIndex = -1;
-	std::memset(usedEdge, 0, sizeof(usedEdge));
+	dfaTraceIndex = -1;
+	nfaTraceIndex = -1;
+	std::memset(dfaUsedEdge, 0, sizeof(dfaUsedEdge));
+	std::memset(dfaCurEdge, 0, sizeof(dfaCurEdge));
+	std::memset(nfaUsedEdge, 0, sizeof(nfaUsedEdge));
+	std::memset(nfaCurEdge, 0, sizeof(nfaCurEdge));
+	dfaCurFrom = dfaCurTo = -1; dfaCurIc = -1; dfaCurStep = -1;
+	nfaCurFrom = nfaCurTo = -1; nfaCurIc = -1; nfaCurStep = -1;
 	return selectedAutomaton != nullptr;
 }
 
@@ -514,7 +521,7 @@ void UiApp::onLex() {
 	std::string tokText;
 	appendTokensTo(tokText);
 	setEditText(hEditTokens, tokText);
-	recomputeNfaTrace();
+	recomputeTrace();
 	InvalidateRect(hNfaGraph, nullptr, TRUE);
 	InvalidateRect(hDfaGraph, nullptr, TRUE);
 }
@@ -648,7 +655,8 @@ void UiApp::onTranslate() {
 void UiApp::onRunAll() {
 	// Always re-run the full pipeline from a clean state
 	invalidateFromLex();
-	traceIndex = -1; // reset trace stepping
+	dfaTraceIndex = -1; // reset DFA trace stepping
+	nfaTraceIndex = -1; // reset NFA trace stepping
 
 	onLex();
 	if (!tokensReady) return;
@@ -791,32 +799,176 @@ void UiApp::onAutomatonChanged() {
 	if (sel >= cnt) return;
 	selectedAutomaton = automatonManager.findById(ids[sel]);
 	if (selectedAutomaton) { buildLexerNFA(nfa); determinizeNFA(nfa, dfaFromNfa); }
-	recomputeNfaTrace();
+	recomputeTrace();
 	InvalidateRect(hNfaGraph, nullptr, TRUE);
 	InvalidateRect(hDfaGraph, nullptr, TRUE);
 }
-void UiApp::recomputeNfaTrace() {
-	std::memset(usedEdge, 0, sizeof(usedEdge));
+void UiApp::recomputeDfaTrace() {
+	std::memset(dfaUsedEdge, 0, sizeof(dfaUsedEdge));
+	std::memset(dfaCurEdge, 0, sizeof(dfaCurEdge));
+	dfaCurFrom = dfaCurTo = -1; dfaCurIc = -1; dfaCurStep = -1;
 	if (!selectedAutomaton) return;
 	const Automaton& a = dfaFromNfa.numStates > 0 ? dfaFromNfa : *selectedAutomaton;
-	int limit = (traceIndex < 0 || !traceEnabled) ? (int)sourceCode.size() : (traceIndex + 1);
+	int limit = (dfaTraceIndex < 0 || !traceEnabled) ? (int)sourceCode.size() : (dfaTraceIndex + 1);
 	int state = 0;
 	for (int i = 0; i < limit; ++i) {
 		int ic = classifyChar(sourceCode[i]);
 		int ns = nextState(a, state, ic);
 		if (ns == -1) { state = 0; continue; }
-		if (traceEnabled && state >= 0 && state < MAX_STATES && ic >= 0 && ic <= NUM_INPUT_CLASSES) {
-			usedEdge[state][ic] = true;
+		if (traceEnabled && state >= 0 && state < MAX_STATES && ic >= 0 && ic < NUM_INPUT_CLASSES) {
+			dfaUsedEdge[state][ic] = true;
 		}
 		state = ns;
+	}
+	// Track current (last) step edge distinctly for DFA
+	if (traceEnabled && limit > 0) {
+		int s = 0;
+		for (int i = 0; i < limit; ++i) {
+			int ic = classifyChar(sourceCode[i]);
+			int ns = nextState(a, s, ic);
+			if (ns == -1) { s = 0; continue; }
+			if (i == limit - 1) {
+				dfaCurFrom = s; dfaCurTo = ns; dfaCurIc = ic; dfaCurStep = i;
+				if (s >= 0 && s < MAX_STATES && ic >= 0 && ic < NUM_INPUT_CLASSES) {
+					dfaCurEdge[s][ic] = true;
+				}
+			}
+			s = ns;
+		}
+	}
+}
+
+static void expandEpsilonClosure(const NFA& nfa, unsigned int& activeSet, bool markUsed[MAX_STATES][NUM_INPUT_CLASSES + 1]) {
+	queue<int> epsQ;
+	// Add all currently active states to queue
+	for (int s = 0; s < nfa.numStates; ++s) {
+		if (activeSet & (1u << s)) epsQ.push(s);
+	}
+	// Expand epsilon closure
+	while (!epsQ.empty()) {
+		int s = epsQ.front(); epsQ.pop();
+		const NFATransitions& epsTr = nfa.trans[s][NUM_INPUT_CLASSES];
+		for (int k = 0; k < epsTr.count; ++k) {
+			int ns = epsTr.dest[k];
+			if (!(activeSet & (1u << ns))) {
+				activeSet |= (1u << ns);
+				epsQ.push(ns);
+				// Mark epsilon transition as used
+				if (s >= 0 && s < MAX_STATES) {
+					markUsed[s][NUM_INPUT_CLASSES] = true;
+				}
+			}
+		}
+	}
+}
+
+void UiApp::recomputeNfaTrace() {
+	std::memset(nfaUsedEdge, 0, sizeof(nfaUsedEdge));
+	std::memset(nfaCurEdge, 0, sizeof(nfaCurEdge));
+	nfaCurFrom = nfaCurTo = -1; nfaCurIc = -1; nfaCurStep = -1;
+	if (!selectedAutomaton || nfa.numStates <= 0 || sourceCode.empty()) return;
+	
+	int limit = (nfaTraceIndex < 0 || !traceEnabled) ? (int)sourceCode.size() : (nfaTraceIndex + 1);
+	
+	// Start at state 0
+	unsigned int activeSet = 1u << 0;
+	
+	// Expand initial epsilon closure (from start state)
+	expandEpsilonClosure(nfa, activeSet, nfaUsedEdge);
+	
+	// If we're at step 0 and haven't processed any characters yet,
+	// mark the first epsilon transition from start as current
+	if (limit == 0 && traceEnabled) {
+		const NFATransitions& epsTr = nfa.trans[0][NUM_INPUT_CLASSES];
+		if (epsTr.count > 0) {
+			nfaCurFrom = 0;
+			nfaCurTo = epsTr.dest[0];
+			nfaCurIc = NUM_INPUT_CLASSES;
+			nfaCurStep = -1; // before first character
+			if (0 < MAX_STATES) {
+				nfaCurEdge[0][NUM_INPUT_CLASSES] = true;
+			}
+			return;
+		}
+	}
+	
+	// Process each character
+	for (int i = 0; i < limit; ++i) {
+		char c = sourceCode[i];
+		int ic = classifyChar(c);
+		
+		// Move on input character from current active states
+		unsigned int nextSet = 0;
+		int candidateFrom = -1, candidateTo = -1;
+		
+		// Check if we're already in a dead state
+		bool wasInDeadState = (activeSet == 0);
+		
+		if (!wasInDeadState) {
+			for (int s = 0; s < nfa.numStates; ++s) {
+				if (activeSet & (1u << s)) {
+					const NFATransitions& tr = nfa.trans[s][ic];
+					for (int k = 0; k < tr.count; ++k) {
+						int ns = tr.dest[k];
+						nextSet |= (1u << ns);
+						// Mark transition as used
+						if (s >= 0 && s < MAX_STATES && ic >= 0 && ic < NUM_INPUT_CLASSES) {
+							nfaUsedEdge[s][ic] = true;
+						}
+						// Track first transition for current step indicator
+						if (i == limit - 1 && traceEnabled && candidateFrom < 0) {
+							candidateFrom = s;
+							candidateTo = ns;
+						}
+					}
+				}
+			}
+			
+			// Expand epsilon closure of next states (after consuming character)
+			if (nextSet != 0) {
+				expandEpsilonClosure(nfa, nextSet, nfaUsedEdge);
+			}
+		}
+		
+		// Mark current step transition (ALWAYS set this for the last character being processed)
+		if (i == limit - 1 && traceEnabled) {
+			nfaCurIc = ic;
+			nfaCurStep = i;
+			if (candidateFrom >= 0) {
+				// Valid transition found
+				nfaCurFrom = candidateFrom;
+				nfaCurTo = candidateTo;
+				if (candidateFrom >= 0 && candidateFrom < MAX_STATES && ic >= 0 && ic < NUM_INPUT_CLASSES) {
+					nfaCurEdge[candidateFrom][ic] = true;
+				}
+			} else {
+				// No valid transition - but still show step info
+				// Find first active state (if any) to show where we are
+				nfaCurFrom = -1;
+				nfaCurTo = -1;
+				for (int s = 0; s < nfa.numStates; ++s) {
+					if (activeSet & (1u << s)) {
+						nfaCurFrom = s;
+						break;
+					}
+				}
+				// Even if no active state, we still have a valid step number
+				// nfaCurStep and nfaCurIc are already set above
+			}
+		}
+		
+		activeSet = nextSet;
+		// Continue processing even in dead state to ensure step indicator is set
 	}
 }
 
 void UiApp::recomputeTrace() {
 	if (!traceEnabled) {
-		std::memset(usedEdge, 0, sizeof(usedEdge));
+		std::memset(dfaUsedEdge, 0, sizeof(dfaUsedEdge));
+		std::memset(nfaUsedEdge, 0, sizeof(nfaUsedEdge));
 		return;
 	}
+	recomputeDfaTrace();
 	recomputeNfaTrace();
 }
 
@@ -1155,22 +1307,66 @@ LRESULT CALLBACK UiApp::MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 				self->traceEnabled = true;
 				SendMessageA(self->hChkTrace, BM_SETCHECK, BST_CHECKED, 0);
 			}
-			if (self->traceIndex < 0) self->traceIndex = 0;
-			else if (self->traceIndex < (int)self->sourceCode.size() - 1) self->traceIndex++;
-			else self->traceIndex = -1; // full
-			self->recomputeTrace();
-			InvalidateRect(self->hNfaGraph, nullptr, TRUE);
-			InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			// Check which tab is currently active
+			int selTab = TabCtrl_GetCurSel(self->hTab);
+			int tabCount = TabCtrl_GetItemCount(self->hTab);
+			bool isDfaTab = (tabCount >= 6 && selTab == 4);
+			bool isNfaTab = (tabCount >= 6 ? (selTab == 5) : (selTab == 4));
+			
+			// Update the appropriate trace based on active tab
+			if (isDfaTab) {
+				if (self->dfaTraceIndex < 0) self->dfaTraceIndex = 0;
+				else if (self->dfaTraceIndex < (int)self->sourceCode.size() - 1) self->dfaTraceIndex++;
+				else self->dfaTraceIndex = -1; // full
+				self->recomputeDfaTrace();
+				InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			} else if (isNfaTab) {
+				if (self->nfaTraceIndex < 0) self->nfaTraceIndex = 0;
+				else if (self->nfaTraceIndex < (int)self->sourceCode.size() - 1) self->nfaTraceIndex++;
+				else self->nfaTraceIndex = -1; // full
+				self->recomputeNfaTrace();
+				InvalidateRect(self->hNfaGraph, nullptr, TRUE);
+			} else {
+				// If neither tab is active, update both
+				if (self->dfaTraceIndex < 0) self->dfaTraceIndex = 0;
+				else if (self->dfaTraceIndex < (int)self->sourceCode.size() - 1) self->dfaTraceIndex++;
+				else self->dfaTraceIndex = -1;
+				if (self->nfaTraceIndex < 0) self->nfaTraceIndex = 0;
+				else if (self->nfaTraceIndex < (int)self->sourceCode.size() - 1) self->nfaTraceIndex++;
+				else self->nfaTraceIndex = -1;
+				self->recomputeTrace();
+				InvalidateRect(self->hNfaGraph, nullptr, TRUE);
+				InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			}
 		} break;
 		case IDC_BTN_RESET: {
-			self->traceIndex = 0;
 			if (!self->traceEnabled) {
 				self->traceEnabled = true;
 				SendMessageA(self->hChkTrace, BM_SETCHECK, BST_CHECKED, 0);
 			}
-			self->recomputeTrace();
-			InvalidateRect(self->hNfaGraph, nullptr, TRUE);
-			InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			// Check which tab is currently active
+			int selTab = TabCtrl_GetCurSel(self->hTab);
+			int tabCount = TabCtrl_GetItemCount(self->hTab);
+			bool isDfaTab = (tabCount >= 6 && selTab == 4);
+			bool isNfaTab = (tabCount >= 6 ? (selTab == 5) : (selTab == 4));
+			
+			// Reset the appropriate trace based on active tab
+			if (isDfaTab) {
+				self->dfaTraceIndex = -1;
+				self->recomputeDfaTrace();
+				InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			} else if (isNfaTab) {
+				self->nfaTraceIndex = -1;
+				self->recomputeNfaTrace();
+				InvalidateRect(self->hNfaGraph, nullptr, TRUE);
+			} else {
+				// If neither tab is active, reset both
+				self->dfaTraceIndex = -1;
+				self->nfaTraceIndex = -1;
+				self->recomputeTrace();
+				InvalidateRect(self->hNfaGraph, nullptr, TRUE);
+				InvalidateRect(self->hDfaGraph, nullptr, TRUE);
+			}
 		} break;
 		default: break;
 		}
@@ -1331,8 +1527,10 @@ void UiApp::drawNfa(HDC hdc, RECT rcClient) {
 	// Solid for normal transitions, dotted for epsilon.
 	HPEN penEdge = CreatePen(PS_SOLID, 1, RGB(160, 160, 200));
 	HPEN penTrace = CreatePen(PS_SOLID, 2, RGB(220, 80, 80));
+	HPEN penCurrent = CreatePen(PS_SOLID, 3, RGB(40, 180, 90));
 	HPEN penEps = CreatePen(PS_DOT, 1, RGB(120, 120, 200));
 	HPEN penEpsTrace = CreatePen(PS_DOT, 1, RGB(220, 80, 80));
+	HPEN penEpsCurrent = CreatePen(PS_DOT, 2, RGB(40, 180, 90));
 	HGDIOBJ oldPen = SelectObject(hdc, penEdge);
 
 	for (int s = 0; s < nfa.numStates; ++s) {
@@ -1341,8 +1539,10 @@ void UiApp::drawNfa(HDC hdc, RECT rcClient) {
 			for (int k = 0; k < tr.count; ++k) {
 				int ns = tr.dest[k];
 				bool isEps = (ic == NUM_INPUT_CLASSES);
-				bool traced = (ic >= 0 && ic <= NUM_INPUT_CLASSES) ? usedEdge[s][ic] : false;
-				SelectObject(hdc, isEps ? (traced ? penEpsTrace : penEps) : (traced ? penTrace : penEdge));
+				bool traced = (ic >= 0 && ic <= NUM_INPUT_CLASSES) ? nfaUsedEdge[s][ic] : false;
+				bool current = (ic >= 0 && ic <= NUM_INPUT_CLASSES) ? nfaCurEdge[s][ic] : false;
+				SelectObject(hdc, isEps ? (current ? penEpsCurrent : (traced ? penEpsTrace : penEps))
+					: (current ? penCurrent : (traced ? penTrace : penEdge)));
 				if (ns == s) {
 					const char* lbl = isEps ? "eps" : inputClassName(ic);
 					drawSelfLoop(hdc, pos[s].x, pos[s].y, 20, lbl);
@@ -1362,6 +1562,8 @@ void UiApp::drawNfa(HDC hdc, RECT rcClient) {
 	DeleteObject(penTrace);
 	DeleteObject(penEps);
 	DeleteObject(penEpsTrace);
+	DeleteObject(penCurrent);
+	DeleteObject(penEpsCurrent);
 
 	for (int s = 0; s < nfa.numStates; ++s) {
 		RECT r = { pos[s].x - 20, pos[s].y - 20, pos[s].x + 20, pos[s].y + 20 };
@@ -1376,6 +1578,36 @@ void UiApp::drawNfa(HDC hdc, RECT rcClient) {
 
 	// legend
 	drawLegend(hdc, rcClient.left + 8, rcClient.top + 8);
+	// step indicator (NFA-specific)
+	if (traceEnabled && nfaTraceIndex >= 0 && nfaCurStep >= 0) {
+		char info[256];
+		char ch = (nfaCurStep >= 0 && nfaCurStep < (int)sourceCode.size()) ? sourceCode[nfaCurStep] : '?';
+		if (nfaCurFrom >= 0 && nfaCurTo >= 0) {
+			// Valid transition
+			snprintf(info, sizeof(info), "Step %d/%d  '%c'  [%s]  S%d -> S%d",
+				nfaCurStep + 1, (int)sourceCode.size(), ch, 
+				(nfaCurIc == NUM_INPUT_CLASSES ? "eps" : inputClassName(nfaCurIc)), 
+				nfaCurFrom, nfaCurTo);
+		} else if (nfaCurFrom >= 0) {
+			// Stuck in a state (no valid transition)
+			snprintf(info, sizeof(info), "Step %d/%d  '%c'  [%s]  S%d -> (no transition)",
+				nfaCurStep + 1, (int)sourceCode.size(), ch,
+				(nfaCurIc == NUM_INPUT_CLASSES ? "eps" : inputClassName(nfaCurIc)),
+				nfaCurFrom);
+		} else {
+			// Dead state or initial state
+			snprintf(info, sizeof(info), "Step %d/%d  '%c'  [%s]",
+				nfaCurStep + 1, (int)sourceCode.size(), ch,
+				(nfaCurIc == NUM_INPUT_CLASSES ? "eps" : inputClassName(nfaCurIc)));
+		}
+		TextOutA(hdc, rcClient.left + 8, rcClient.top + 8 + 9 * 16, info, (int)strlen(info));
+	} else if (traceEnabled && nfaTraceIndex >= 0 && nfaCurIc == NUM_INPUT_CLASSES && nfaCurFrom >= 0) {
+		// Show epsilon transition at start
+		char info[256];
+		snprintf(info, sizeof(info), "Step 0/%d  (epsilon)  S%d -> S%d",
+			(int)sourceCode.size(), nfaCurFrom, nfaCurTo);
+		TextOutA(hdc, rcClient.left + 8, rcClient.top + 8 + 9 * 16, info, (int)strlen(info));
+	}
 	// start arrow to S0
 	drawStartArrow(hdc, pos[0].x, pos[0].y);
 	SetTextColor(hdc, oldTxt);
@@ -1423,14 +1655,16 @@ void UiApp::drawDfa(HDC hdc, RECT rcClient) {
 
 	HPEN penEdge = CreatePen(PS_SOLID, 1, RGB(150, 180, 160));
 	HPEN penTrace = CreatePen(PS_SOLID, 2, RGB(220, 80, 80));
+	HPEN penCurrent = CreatePen(PS_SOLID, 3, RGB(40, 180, 90));
 	HGDIOBJ oldPen = SelectObject(hdc, penEdge);
 
 	for (int s = 0; s < a.numStates; ++s) {
 		for (int ic = 0; ic < NUM_INPUT_CLASSES; ++ic) {
 			int ns = a.transitionTable[s][ic];
 			if (ns < 0) continue;
-			bool traced = usedEdge[s][ic];
-			SelectObject(hdc, traced ? penTrace : penEdge);
+			bool traced = dfaUsedEdge[s][ic];
+			bool current = dfaCurEdge[s][ic];
+			SelectObject(hdc, current ? penCurrent : (traced ? penTrace : penEdge));
 			if (ns == s) {
 				const char* lbl = inputClassName(ic);
 				drawSelfLoop(hdc, pos[s].x, pos[s].y, 20, lbl);
@@ -1447,6 +1681,7 @@ void UiApp::drawDfa(HDC hdc, RECT rcClient) {
 	SelectObject(hdc, oldPen);
 	DeleteObject(penEdge);
 	DeleteObject(penTrace);
+	DeleteObject(penCurrent);
 
 	for (int s = 0; s < a.numStates; ++s) {
 		RECT r = { pos[s].x - 20, pos[s].y - 20, pos[s].x + 20, pos[s].y + 20 };
@@ -1460,6 +1695,14 @@ void UiApp::drawDfa(HDC hdc, RECT rcClient) {
 	}
 	// legend and start marker
 	drawLegend(hdc, rcClient.left + 8, rcClient.top + 8);
+	// step indicator (DFA-specific)
+	if (traceEnabled && dfaTraceIndex >= 0 && dfaCurFrom >= 0) {
+		char info[256];
+		char ch = (dfaCurStep >= 0 && dfaCurStep < (int)sourceCode.size()) ? sourceCode[dfaCurStep] : '?';
+		snprintf(info, sizeof(info), "Step %d/%d  '%c'  [%s]  S%d -> S%d",
+			dfaCurStep + 1, (int)sourceCode.size(), ch, inputClassName(dfaCurIc), dfaCurFrom, dfaCurTo);
+		TextOutA(hdc, rcClient.left + 8, rcClient.top + 8 + 9 * 16, info, (int)strlen(info));
+	}
 	drawStartArrow(hdc, pos[0].x, pos[0].y);
 	SetTextColor(hdc, oldTxt);
 }

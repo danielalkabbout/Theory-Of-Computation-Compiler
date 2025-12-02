@@ -86,9 +86,26 @@ private:
 
 	// NFA view state
 	NFA nfa;
-	bool usedEdge[MAX_STATES][NUM_INPUT_CLASSES + 1] = {};
 	bool traceEnabled = true;
-	int traceIndex = -1;
+	
+	// DFA trace state (separate from NFA)
+	bool dfaUsedEdge[MAX_STATES][NUM_INPUT_CLASSES] = {};
+	bool dfaCurEdge[MAX_STATES][NUM_INPUT_CLASSES] = {};
+	int dfaTraceIndex = -1;
+	int dfaCurFrom = -1;
+	int dfaCurTo = -1;
+	int dfaCurIc = -1;
+	int dfaCurStep = -1;
+	
+	// NFA trace state (separate from DFA)
+	bool nfaUsedEdge[MAX_STATES][NUM_INPUT_CLASSES + 1] = {};
+	bool nfaCurEdge[MAX_STATES][NUM_INPUT_CLASSES + 1] = {};
+	int nfaTraceIndex = -1;
+	int nfaCurFrom = -1;
+	int nfaCurTo = -1;
+	int nfaCurIc = -1;
+	int nfaCurStep = -1;
+	
 	Automaton dfaFromNfa;
 private:
 	// Lifecycle
@@ -105,6 +122,7 @@ private:
 	void onRunAll();
 	void onSaveTranslation();
 	void onAutomatonChanged();
+	void recomputeDfaTrace();
 	void recomputeNfaTrace();
 	void recomputeTrace();
 
